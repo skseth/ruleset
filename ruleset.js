@@ -2,12 +2,13 @@ const RuleKey = require("./rulekey").RuleKey
 const RuleSetEntry = require("./rulesetentry").RuleSetEntry
 
 class RuleSet {
-  constructor(scopedb) {
+  constructor(scopedb, nodenamefunc) {
     this._scopedb = scopedb
     this._rules = new Map()
     this._rootkey = new RuleKey("1", "1", "1")
     this._rootentry = this._newEntry(this._rootkey)
     this._addEntry(this._rootentry)
+    this._nodenamefunc = nodenamefunc
   }
 
   // basic stuff
@@ -19,12 +20,20 @@ class RuleSet {
     return this._rules
   }
 
+  NodeName(key) {
+    return this._nodenamefunc(key)
+  }
+
   keyExists(key) {
     return this._rules.has(key.toString())
   }
 
   getEntry(key) {
     return this._rules.get(key.toString())
+  }
+
+  getParentEntry(child, idx) {
+    return this.getEntry(child.getParent(idx))
   }
 
 
@@ -43,153 +52,159 @@ class RuleSet {
     this._rules.set(entry.Key.toString(), entry)
   }
 
-
   // add, remove, hide, unhide children
-  addNew(newkey, hide = false) {
-    if (this.keyExists(newkey)) { 
-      this.unhide(newkey)
-      return 
-    }
+  add(newkey, hide = false) {
 
     var newentry = this._newEntry(newkey)
-    newentry.setParent(0, this.Root)
+
+    const family = this._getChildrenAndParents(newentry)
+
+    // TBD - not sure if it is possible for some other entry to have added this one
+    // shouldn't happen
+    this.AssertEntryDoesNotExist(newentry)
+
+    const parentkeys = family.parents.map(p => p.Key)
+
+    for (const child of family.children) {
+      this._addToChild(child, newentry, parentkeys)
+    }
+/*
     if (hide) {
       newentry.hide()
     }
+*/
 
-    const impactingChildren = this._setParentGetChildren(newentry)
-
-    if (impactingChildren.size > 0) {
-      for (const [keystr, childvalue] of impactingChildren) {
-        this._addNewEntryAsParent(newentry, childvalue)
-      }      
-    }
-
-    if (!newentry.Hidden) {
-      const parentEntry = this.getEntry(newentry.getParent(0))
-      parentEntry.addChildValue(newentry.Scope, false)
-    }
+    this._addParents(newentry, family.parents)
 
     this._addEntry(newentry)
+
     return newentry
   }
 
-  remove(key) {
-    var removeentry = this._newEntry(key)
+  _addToChild(child, newparent, grandparentkeys) {
+    const removedParentKeys = []
+
+    while (child.hasMoreDistantParent(newparent.Key)) {
+      removedParentKeys.push(this._removeParent(child))
+    }
+
+    this._addParent(child, newparent)
+
+    removedParentKeys
+      .filter(k => grandparentkeys.indexOf(k) < 0)
+      .forEach(k => this._addParent(child, this.getEntry(k)))
+   }
+
+  _removeParent(child) {
+    const parentEntry = this.getEntry(child.popParent())
+
+    if (!(child.Hidden && child.Parents.length === 0)) {
+      parentEntry.changeImpactedBy(child.Scope)      
+    }
+
+    if (child.Parents.length > 0) {
+      this._changeDescopeForParent(child, parentEntry, -child.Scope)
+    }
+
+    return parentEntry.Key
   }
 
-  unhide(newkey) {
-    const entry = this.getEntry(newkey)
-
-    if (entry.Hidden) {
-      entry.Unhide()
-      this.getEntry(child.getParent(0)).addChildValue(child.Scope, false)      
+  _addParents(entry, parentEntries) {
+    for (const parentEntry of parentEntries) {
+      this._addParent(entry, parentEntry)
     }
   }
 
-  hide(newkey) {
-    const entry = this.getEntry(newkey)
+  _addParent(child, newparent) {
+    if (!(child.Hidden && child.Parents.length === 0)) {
+      newparent.changeImpactedBy(-child.Scope)
+    }
 
-    if (!entry.Hidden) {
-      entry.Hide()
-      this.getEntry(child.getParent(0)).removeChildValue(child.Scope, false)      
-    }    
+    if (child.Parents.length > 0) {
+      this._changeDescopeForParent(child, newparent, child.Scope)
+    }
+
+    child.pushParent(newparent.Key)
   }
 
-  _addNewEntryAsParent(newentry, child) {
-    const noOfExistingParents = child.Parents.length
+  _changeDescopeForParent(child, parentEntry, descopeChangeAmt) {
+    const unionKeys = child.Parents.map(p => parentEntry.Key.unionKey(p))
 
-    for (var i = 0; i < noOfExistingParents; i++) {
-      const parentkey = child.getParent(i)
-      if (parentkey.isAncestorOf(newentry.Key)) {
-        this._replaceParentWithDescendent(child, i, newentry)
-        return
+    function isNotImpactingUnionKey(curkey) {
+      for (var i = 0; i < unionKeys.length; i++) {
+        if (curkey.isAncestorOrEqualOf(unionKeys[i])) {
+          return false
+        }
       }
-      else if (parentkey.isMoreDistantIntersectionParent(newentry.Key)) {
-        this._insertParentWithNearerIntersection(child, i, newentry)
-        return
-      }
+      return true
     }
 
-    if (noOfExistingParents >= 3) {
-      console.log("No place to add new parent!!!")
-      return
+    var parentKey = parentEntry.Key
+
+    while (isNotImpactingUnionKey(parentKey)) {
+      const parentEntry = this.getEntry(parentKey)
+      parentEntry.changeDescopedBy(descopeChangeAmt)
+      parentKey = parentEntry.getParent(0)
     }
 
-    // can only be descoped, because every node except root has one parent for sure
-    child.setParent(noOfExistingParents, newentry.Key)
-    newentry.addChildValue(child.Scope, true)
+    // since scope of child has reduced / increased, the ultimate parent's
+    // impacted must change by same amount
+    this.getEntry(parentKey).changeImpactedBy(descopeChangeAmt)
   }
 
-  _replaceParentWithDescendent(child, idx, newentry) {
-    const currentParent = this.getEntry(child.getParent(idx));
-    const scopeToAdjust = (idx === 0 && child.Hidden) ? 0 : child.Scope
-    const isDescoped = (idx !== 0)
-
-    currentParent.removeChildValue(scopeToAdjust, isDescoped)
-    newentry.addChildValue(child.Scope, isDescoped)
-    child.setParent(idx, newentry.Key)
-  }
-
-  _insertParentWithNearerIntersection(child, idx, newentry) {
-    const currentParent = this.getEntry(child.getParent(idx));
-    const scopeToAdjust = (idx === 0 && child.Hidden) ? 0 : child.Scope
-    const isDescoped = (idx !== 0)
-
-    if (!isDescoped) {
-      // we only need to do this for first parent
-      // as it is now descoped
-      currentParent.removeChildValue(scopeToAdjust, isDescoped)
-      this._propogateDescope(currentParent.Key, newentry.Key, child.Scope)      
-    }
-
-    newentry.addChildValue(scopeToAdjust, isDescoped)    
-    child.insertParentAt(idx, newentry.Key)
-  }
-
-  _propogateDescope(currentParentKey, intersectionKey, scopetoadjust) {
-    // we know currentParentKey cannot be root
-    // because root is ancestor of all nodes
-    const unionKey = currentParentKey.unionKey(intersectionKey)
-
-    var curKey = currentParentKey;
-
-    while (!curKey.isAncestorOrEqualOf(unionKey)) {
-      const entry = this.getEntry(curKey)
-      entry.addChildValue(scopetoadjust, true)
-      curKey = entry.getParent(0)
-    }
-
-    // union guy gets some impacted back, as child's scope is reduced
-    this.getEntry(curKey).removeChildValue(scopetoadjust, false)
-  }
-
-  // find 
-  _setParentGetChildren(newentry) {
+  _getChildrenAndParents(newentry) {
 
     const descendentEntries = new Map()
+    const parentEntries = new Map()
 
-    // create impactedchild list
-    for (const [keystr, value] of this._rules) {
+    /*
+      TBD - We can maintain a nodes by product hierarchy to cut down the search space
+    */
+
+    for (const [keystr, value] of this.Entries) {
       if (newentry.Key.isAncestorOf(value.Key)) {
         descendentEntries.set(keystr, value)
       }
       else if (value.Key.isAncestorOf(newentry.Key)) {
-        if (newentry.getParent(0).isAncestorOf(value.Key) ) {
-          newentry.setParent(0, value.Key)
-        }
+        parentEntries.set(keystr, value)
       }
       else if (newentry.Key.isIntersecting(value.Key)) {
+
         const intersectionKey = newentry.Key.intersectionKey(value.Key)
+        // relies on Map property that entries are always added at the end
+        // so items will end up in descendentEntries or parentEntries
         if (!this.keyExists(intersectionKey)) {
-          // relies on Map property that entries are always added at the end
-          // so items will end up in descendentEntries
-          const intersectionEntry = this.addNew(intersectionKey, true)
+          const intersectionEntry = this.add(intersectionKey, true)
+        }
+        const unionKey = newentry.Key.unionKey(value.Key)
+        if (!this.keyExists(unionKey)) {
+          const unionEntry = this.add(unionKey, true)
         }
       }
     }
 
-    return RuleSet._lub(descendentEntries)
+    const immParentEntries = RuleSet._glb(parentEntries)
+                              .sort((a,b) => {
+                                      a.Key.distanceFromRelated(newkey) - b.Key.distanceFromRelated(newkey)
+                                    })
+
+    return {
+      "children": RuleSet._lub(descendentEntries),
+      "parents" : immParentEntries
+    }
+  }
+
+
+  static _glb(rulemap) {
+    const glb = new Map(rulemap)
+
+    for (const [keystr, value] of rulemap) {
+      for (const parentkey of value.Parents) {
+        glb.delete(parentkey.toString())
+      }
+    }
+
+    return [...glb.values()]
   }
 
   static _lub(rulemap) {
@@ -209,8 +224,143 @@ class RuleSet {
       }
     }
 
-    return lub
+    return [...lub.values()]
   }
+
+  static _info(msg) {
+    console.log(msg)
+  }
+
+  static _assert(cond, msg) {
+    if (!cond) {
+      throw new Error(msg)
+    }
+  }
+
+  AssertParentsAreIntersectingOrParentsOfNew(child, newparent) {
+    RuleSet._info(` ASSERT ${this.NodeName(child.Key)} : AssertParentsAreIntersectingOrParentsOfNew`)
+    RuleSet._info(`  New Parent Key ${this.NodeName(newparent.Key)}`)
+    const newparentkey = newparent.Key
+    var cParents = 0
+
+    for (var idx = 0; idx < child.Parents.length; idx++) {
+      const parentkey = child.getParent(idx)
+      if (newparent.isChildOf(parentkey)) {
+        cParents++
+        RuleSet._info(`  ${this.NodeName(parentkey)} is parent of new`)        
+      }
+      else if (parentkey.isIntersecting(newparentkey)) {
+          RuleSet._info(`  ${this.NodeName(parentkey)} is intersecting new`)
+          const intersectionKey = parentkey.intersectionKey(newparentkey)
+      }
+      else {
+        RuleSet._assert(false, `${this.NodeName(parentkey)} is neither parent nor intersecting`)        
+      }
+    }
+
+    RuleSet._assert(cParents <= 1, "More than one parent found")         
+  }
+
+  AssertEntryDoesNotExist(entry) {
+    if (this.keyExists(entry.Key)) {
+      throw new Error(`Entry ${this.NodeName(entry.Key)} already exists!`)
+    }
+  }
+
+  AssertParentsAreIntersecting(entry) {
+    RuleSet._info(` ASSERT ${this.NodeName(entry.Key)} : AssertParentsAreIntersecting`)
+    const parents = entry.Parents
+
+    if (parents.length === 0) {
+      throw new Error(`Entry ${this.NodeName(entry.Key)} has no parents!`)      
+    }
+    else if (parents.length > 1) {
+      for (var i = 0; i < parents.length - 1; i++) {
+        for (var j = 1; j < parents.length; j++) {
+          if (!entry.getParent(i).isIntersecting(entry.getParent(j))) {
+            const intersectionKey = entry.getParent(i).intersectionKey(entry.getParent(j))
+
+            throw new Error(` Parent ${i} - ${this.NodeName(entry.getParent(i))} does not intersect ${j} - ${this.NodeName(entry.getParent(j))}`);
+          }
+          else {
+            console.log(` Parent ${i} - ${this.NodeName(entry.getParent(i))} intersects ${j} - ${this.NodeName(entry.getParent(j))}`)
+          }
+        }
+      }
+    }
+    else {
+      console.log(` Parent ${this.NodeName(entry.getParent(0))}`)      
+    }
+  }
+
+  VerifyEntry(key) {
+    const name = (key) => {
+      return this.NodeName(key)
+    }
+
+    const log = (type, entry) => {
+      console.log(`${type}\t${entry.OriginalScope}\t${entry.Scope}\t${entry.Impacted}\t${entry.Hidden}\t${name(entry.Key)}`)
+    }
+
+    const entry = this.getEntry(key)
+
+    console.log(`\n\nVerifying ${name(key)}`)
+    log(" Parent ", entry)        
+
+
+    const descendentEntries = new Map()
+
+    for (const [keystr, value] of this.Entries) {
+      if (key.isAncestorOf(value.Key)) {
+        descendentEntries.set(keystr, value)
+      }      
+    }
+
+    const children = RuleSet._lub(descendentEntries)
+
+    var totalDescoped = 0
+    var totalImpacted = 0
+    var totalHiddenImpacted = 0
+
+    for (const cvalue of children) {
+      if (cvalue.getParent(0).isEqual(key)) {
+        if (cvalue.Hidden) {
+          log(" HImpact", cvalue)        
+          totalHiddenImpacted += (cvalue.Scope - cvalue.Impacted)
+        }
+        else {
+          log(" Impact ", cvalue)        
+          totalImpacted += cvalue.Scope
+        }
+      }
+      else if (cvalue.getParent(1) && cvalue.getParent(1).isEqual(key)) {
+        log(" Dscop1 ", cvalue)                
+        totalDescoped += cvalue.Scope
+      }
+      else if (cvalue.getParent(2) && cvalue.getParent(2).isEqual(key)) {
+        log(" Dscop2 ", cvalue)                
+        totalDescoped += cvalue.Scope
+      }
+    }
+
+    console.log(` Parents : ${entry.Parents.map(p => this.NodeName(p))}`)
+
+    const expectedScope = entry.OriginalScope - totalDescoped
+    const expectedImpacted =  expectedScope - totalImpacted - totalHiddenImpacted
+
+    if (expectedScope !== entry.Scope) {
+      console.log(`***Failed expected Scope : ${expectedScope}`)
+    }
+
+    if (expectedImpacted !== entry.Impacted) {
+      console.log(`***Failed expected Impact : ${expectedImpacted}`)
+    }
+
+  }
+
 }
 
+
 module.exports.RuleSet = RuleSet
+
+

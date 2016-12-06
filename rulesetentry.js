@@ -1,5 +1,7 @@
 const RuleKey = require("./rulekey").RuleKey
 
+var namefunc = (key) => { return key.toString() }
+
 class RuleSetEntry {
   constructor(rulekey, scope) {
     this._rulekey = rulekey
@@ -17,6 +19,10 @@ class RuleSetEntry {
   get Parents() { return this._parents }
   get Hidden() { return this._hidden }
 
+  isEqual(other) {
+    return this.Key.isEqual(other.Key)
+  }
+
   // hide / unhide
   unhide() {
     this._hidden = false
@@ -26,8 +32,9 @@ class RuleSetEntry {
     this._hidden = true
   }
 
-  setParent(idx, parentkey) {
-    this._parents[idx] = parentkey
+  isChildOf(key) {
+    const idx = this.getParentInsertionIndex(key)
+    return (idx < this.Parents.length) && (this.getParent(idx).isEqual(key))
   }
 
   getParent(idx) {
@@ -36,39 +43,52 @@ class RuleSetEntry {
     }
   }
 
-  insertParentAt(idx, parentKey) {
-    if (idx < this._parents.length) {
-      for (var i = this._parents.length; i > idx; i--) {
-        this._parents[i] = this._parents[i-1]
-      }
+  pushParent(p) {
+    this._assert(p instanceof RuleKey, "invalid parent type")
+    if (this._parents.length < 3) {
+      this._parents.push(p)
     }
-    this._parents[idx] = parentKey
+    else {
+      throw new Error(`Add Parent ${p} - One too many for ${this.Key.toString()}.\nExisting parents are : ${this._parents}`);
+    }
   }
 
-  removeParentAt(parentKey, idx) {
-    if (idx < this._parents.length) {
-      for (var i = idx; i < this._parents.length-1; i++) {
-        this._parents[i] = this._parents[i+1]
-      }
-    }
-    this._parents.pop()
+  popParent() {
+    return this._parents.pop()
   }
 
-  // descoped + impacted
-  addChildValue(value, isDescoping) {
-    if (isDescoping) {
-      this._descoped += value
-    }
+  hasMoreDistantParent(otherkey) {
+    if (this.Parents.length > 0) {
+      const parentKey = this.Parents[this.Parents.length -1]
+      const parentdistance = parentKey.distanceFromRelated(this.Key)
 
-    this._impacted -= value    
+      return parentdistance > otherkey.distanceFromRelated(this.Key)
+    }
+    return false
   }
 
-  removeChildValue(value, isDescoping) {
-    if (isDescoping) {
-      this._descoped -= value
-    }
+  changeImpactedBy(value) {
+    this._impacted += value
+    //this._info(`Impacted changed by ${value} to ${this._impacted}`)
+  }
 
-    this._impacted += value    
+  changeDescopedBy(value) {
+    this._descoped += value
+    //this._info(`Descoped changed by ${value} to ${this._descoped}`)
+  }
+
+  _assert(cond, msg) {
+    if (!cond) {
+      throw new Error(msg)
+    }
+  }
+
+  _info(msg) {
+    console.log(`${namefunc(this.Key)} - ${msg}`)
+  }
+
+  static setNameFunc(newnamefunc) {
+    namefunc = newnamefunc
   }
 
   toString() {

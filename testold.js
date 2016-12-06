@@ -1,12 +1,11 @@
 const Hierarchy = require("./hierarchy").Hierarchy
 const RuleKey = require("./rulekey").RuleKey
 const RuleSet = require("./ruleset").RuleSet
-const RuleSetEntry = require("./rulesetentry").RuleSetEntry
 const ScopeDB = require("./scopedb").ScopeDB
 
 
 const products = Hierarchy.createHierarchy(
-    ["All", [
+    ["All Products", [
       ["Jeans", [
         ["Faded Jeans", [
           ["Torn Jeans"]
@@ -17,7 +16,7 @@ const products = Hierarchy.createHierarchy(
 )
 
 const locations = Hierarchy.createHierarchy(
-    ["All", [
+    ["All Locations", [
       ["India", [
         ["Karnataka",[
           ["Bangalore", [
@@ -32,23 +31,11 @@ const locations = Hierarchy.createHierarchy(
 
 
 const itemtypes = Hierarchy.createHierarchy(
-    ["All", [
+    ["All Item Types", [
       ["KVI"],
       ["General"]
     ]]
 )
-
-const name = (key) => {
-  const nvl_name = (node, nvl) => {
-    return node ? node.Name : nvl
-  }
-
-  const pn = nvl_name(products.getNodeByHierarchyId(key.pid), key.pid)
-  const ln = nvl_name(locations.getNodeByHierarchyId(key.lid), key.lid)
-  const tn = nvl_name(itemtypes.getNodeByHierarchyId(key.tid), key.tid)
-  return `${pn}\\${ln}\\${tn}`   
-}
-
 
 function printData() {
   products.print()
@@ -97,7 +84,7 @@ function printRuleSet(ruleset) {
 
 const scopedb = new ScopeDB()
 generateData()
-const ruleset = new RuleSet(scopedb, name)
+const ruleset = new RuleSet(scopedb)
 
 const rootkey = new RuleKey("1", "1", "1")
 const FJeansKarKey = new RuleKey(products.byName("Faded Jeans"), 
@@ -105,9 +92,6 @@ const FJeansKarKey = new RuleKey(products.byName("Faded Jeans"),
                               "1")
 const JeansBlrKey = new RuleKey(products.byName("Jeans"), 
                               locations.byName("Bangalore"),
-                              "1")
-const JeansKarKey = new RuleKey(products.byName("Jeans"), 
-                              locations.byName("Karnataka"),
                               "1")
 
 const JeansKorKey = new RuleKey(products.byName("Jeans"), 
@@ -136,29 +120,29 @@ const TJeansKarKey = new RuleKey(products.byName("Torn Jeans"),
                               "1")
 
 function addToRuleset(key) {
+  const name = (key) => {
+    const pn = products.getNodeByHierarchyId(key.pid).Name
+    const ln = locations.getNodeByHierarchyId(key.lid).Name   
+    return `${pn}\\${ln}`   
+  }
 
   console.log(`----------${name(key)}---------`)
-  ruleset.add(key)
-
-  for (const entry of ruleset.Entries.values()) {
-    ruleset.VerifyEntry(entry.Key)    
+  ruleset.addNew(key)
+  for (const [keystr, value] of ruleset.Entries) {
+    ruleset.VerifyEntry(value.Key, products, locations, itemtypes)  
   }
   console.log(`----------END ${name(key)}---------\n\n`)
 }
 
-console.log(name(FJeansKarKey.unionKey(JeansKarKey)))
-
-
-RuleSetEntry.setNameFunc(name)
-
 addToRuleset(JeansBlrKey)
-addToRuleset(FJeansBlrKey)
-addToRuleset(JeansKarKey)
 addToRuleset(FJeansKarKey)
+addToRuleset(FJeansBlrKey) // common to JeansBlr and FJeansKar
+//ruleset.addNew(FJeansKorKey)
+addToRuleset(TJeansKorKey)
+addToRuleset(TJeansKarKey)
+addToRuleset(TJeansIndKey)
 
 printRuleSet(ruleset)
-
-
 
 
 
