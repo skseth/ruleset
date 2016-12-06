@@ -74,21 +74,19 @@ function generateData() {
 }
 
 function printRuleSet(ruleset) {
-  console.log(`O.Scope\tImp.\tScope\tHidden\tName`)
+  console.log(`O.Scope\tImp.\tHImp.\tScope\tHidden\tName`)
 
-  impactedTotal = 0
-  hiddenImpactedTotal = 0
+  var impactedTotal = 0
+  var hiddenImpactedTotal = 0
 
   for (var [k, v] of ruleset.Entries) {
-    if (v.Hidden) {
-      hiddenImpactedTotal += v.Impacted
-    }
-    else {
-      impactedTotal += v.Impacted
+    impactedTotal += v.Impacted
+    if (!v.Hidden) {
+      hiddenImpactedTotal += v.Impacted + v.HiddenImpacted
     }
     const pn = products.getNodeByHierarchyId(v.Key.pid).Name
     const ln = locations.getNodeByHierarchyId(v.Key.lid).Name
-    console.log(`${v.OriginalScope}\t${v.Impacted}\t${v.Scope}\t${v.Hidden}\t${pn}\\${ln}`);
+    console.log(`${v.OriginalScope}\t${v.Impacted}\t${v.HiddenImpacted}\t${v.Scope}\t${v.Hidden}\t${pn}\\${ln}`);
   }
 
   console.log(`Impacted Total : ${impactedTotal}`)
@@ -152,8 +150,8 @@ console.log(name(FJeansKarKey.unionKey(JeansKarKey)))
 RuleSetEntry.setNameFunc(name)
 
 addToRuleset(JeansBlrKey)
-addToRuleset(FJeansBlrKey)
-addToRuleset(JeansKarKey)
+//addToRuleset(FJeansBlrKey)
+//addToRuleset(JeansKarKey)
 addToRuleset(FJeansKarKey)
 
 printRuleSet(ruleset)

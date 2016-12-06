@@ -68,11 +68,10 @@ class RuleSet {
     for (const child of family.children) {
       this._addToChild(child, newentry, parentkeys)
     }
-/*
+
     if (hide) {
       newentry.hide()
     }
-*/
 
     this._addParents(newentry, family.parents)
 
@@ -96,11 +95,14 @@ class RuleSet {
    }
 
   _removeParent(child) {
+
     const parentEntry = this.getEntry(child.popParent())
 
-    if (!(child.Hidden && child.Parents.length === 0)) {
-      parentEntry.changeImpactedBy(child.Scope)      
+    if (child.Parents.length === 0) {
+      this._propogateHiddenImpacted(child, parentEntry, true)
     }
+
+    parentEntry.changeImpactedBy(child.Scope)      
 
     if (child.Parents.length > 0) {
       this._changeDescopeForParent(child, parentEntry, -child.Scope)
@@ -116,9 +118,12 @@ class RuleSet {
   }
 
   _addParent(child, newparent) {
-    if (!(child.Hidden && child.Parents.length === 0)) {
-      newparent.changeImpactedBy(-child.Scope)
+
+    if (child.Parents.length === 0) {
+      this._propogateHiddenImpacted(child, newparent, false)
     }
+
+    newparent.changeImpactedBy(-child.Scope)
 
     if (child.Parents.length > 0) {
       this._changeDescopeForParent(child, newparent, child.Scope)
@@ -150,6 +155,22 @@ class RuleSet {
     // since scope of child has reduced / increased, the ultimate parent's
     // impacted must change by same amount
     this.getEntry(parentKey).changeImpactedBy(descopeChangeAmt)
+  }
+
+  _propogateHiddenImpacted(child, parentEntry, remove = false) {
+    while (child.Hidden && (typeof parentEntry !== 'undefined')) {
+
+      if (remove) {
+        parentEntry.changeHiddenImpactedBy(-child.Impacted - child.HiddenImpacted)
+      }
+      else {
+        parentEntry.changeHiddenImpactedBy(child.Impacted + child.HiddenImpacted)        
+      }
+
+      child = parentEntry
+
+      parentEntry = child.getParent(0)
+    }
   }
 
   _getChildrenAndParents(newentry) {
@@ -294,7 +315,7 @@ class RuleSet {
     }
 
     const log = (type, entry) => {
-      console.log(`${type}\t${entry.OriginalScope}\t${entry.Scope}\t${entry.Impacted}\t${entry.Hidden}\t${name(entry.Key)}`)
+      console.log(`${type}\t${entry.OriginalScope}\t${entry.Scope}\t${entry.Impacted}\t${entry.HiddenImpacted}\t${entry.Hidden}\t${name(entry.Key)}`)
     }
 
     const entry = this.getEntry(key)
@@ -315,13 +336,14 @@ class RuleSet {
 
     var totalDescoped = 0
     var totalImpacted = 0
-    var totalHiddenImpacted = 0
+    var expectedHiddenImpacted = 0
 
     for (const cvalue of children) {
       if (cvalue.getParent(0).isEqual(key)) {
         if (cvalue.Hidden) {
           log(" HImpact", cvalue)        
-          totalHiddenImpacted += (cvalue.Scope - cvalue.Impacted)
+          expectedHiddenImpacted += (cvalue.Impacted + cvalue.HiddenImpacted)
+          totalImpacted += cvalue.Scope
         }
         else {
           log(" Impact ", cvalue)        
@@ -341,7 +363,7 @@ class RuleSet {
     console.log(` Parents : ${entry.Parents.map(p => this.NodeName(p))}`)
 
     const expectedScope = entry.OriginalScope - totalDescoped
-    const expectedImpacted =  expectedScope - totalImpacted - totalHiddenImpacted
+    const expectedImpacted =  expectedScope - totalImpacted 
 
     if (expectedScope !== entry.Scope) {
       console.log(`***Failed expected Scope : ${expectedScope}`)
@@ -349,6 +371,10 @@ class RuleSet {
 
     if (expectedImpacted !== entry.Impacted) {
       console.log(`***Failed expected Impact : ${expectedImpacted}`)
+    }
+
+    if (expectedHiddenImpacted !== entry.HiddenImpacted) {
+      console.log(`***Failed expected Hidden Impact : ${expectedHiddenImpacted}`)      
     }
 
   }

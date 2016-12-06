@@ -8,6 +8,7 @@ class RuleSetEntry {
     this._originalscope = scope
     this._descoped = 0
     this._impacted = this._originalscope
+    this._hiddenimpacted = 0
     this._parents = []
     this._hidden = false
   }
@@ -16,6 +17,7 @@ class RuleSetEntry {
   get OriginalScope() { return this._originalscope }
   get Scope() { return this._originalscope - this._descoped}
   get Impacted() { return this._impacted}
+  get HiddenImpacted() { return this._hiddenimpacted}
   get Parents() { return this._parents }
   get Hidden() { return this._hidden }
 
@@ -69,6 +71,11 @@ class RuleSetEntry {
 
   changeImpactedBy(value) {
     this._impacted += value
+    //this._info(`Impacted changed by ${value} to ${this._impacted}`)
+  }
+
+  changeHiddenImpactedBy(value) {
+    this._hiddenimpacted += value
     //this._info(`Impacted changed by ${value} to ${this._impacted}`)
   }
 
