@@ -169,16 +169,11 @@ class RuleSet {
         parentEntries.set(keystr, value)
       }
       else if (newentry.Key.isIntersecting(value.Key)) {
-
         const intersectionKey = newentry.Key.intersectionKey(value.Key)
         // relies on Map property that entries are always added at the end
         // so items will end up in descendentEntries or parentEntries
         if (!this.keyExists(intersectionKey)) {
           const intersectionEntry = this.add(intersectionKey, true)
-        }
-        const unionKey = newentry.Key.unionKey(value.Key)
-        if (!this.keyExists(unionKey)) {
-          const unionEntry = this.add(unionKey, true)
         }
       }
     }
