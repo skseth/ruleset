@@ -144,6 +144,18 @@ function addToRuleset(key) {
   console.log(`----------END ${name(key)}---------\n\n`)
 }
 
+
+function removeFromRuleset(key) {
+
+  console.log(`xxxxxxxxxx REMOVE ${name(key)}xxxxxxxxxx`)
+  ruleset.remove(key)
+
+  for (const entry of ruleset.Entries.values()) {
+    ruleset.VerifyEntry(entry.Key)    
+  }
+  console.log(`xxxxxxxxxx END ${name(key)}xxxxxxxxxx`)
+}
+
 console.log(name(FJeansKarKey.unionKey(JeansKarKey)))
 
 
@@ -155,6 +167,13 @@ addToRuleset(JeansBlrKey)
 addToRuleset(FJeansKarKey)
 
 printRuleSet(ruleset)
+
+removeFromRuleset(FJeansKarKey)
+
+removeFromRuleset(JeansBlrKey)
+
+printRuleSet(ruleset)
+
 
 
 

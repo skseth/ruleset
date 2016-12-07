@@ -52,16 +52,22 @@ class RuleSet {
     this._rules.set(entry.Key.toString(), entry)
   }
 
+  _removeEntry(key) {
+    return this._rules.delete(key.toString())
+  }
+
   // add, remove, hide, unhide children
   add(newkey, hide = false) {
+    if (this.getEntry(newkey)) {
+      if (hide === false) {
+        this.unhide(newkey)
+      }
+      return
+    }
 
     var newentry = this._newEntry(newkey)
 
     const family = this._getChildrenAndParents(newentry)
-
-    // TBD - not sure if it is possible for some other entry to have added this one
-    // shouldn't happen
-    this.AssertEntryDoesNotExist(newentry)
 
     const parentkeys = family.parents.map(p => p.Key)
 
@@ -80,6 +86,48 @@ class RuleSet {
     return newentry
   }
 
+  remove(remkey) {
+
+    var rementry = this.getEntry(remkey)
+
+    if (rementry.Parents.length > 1) {
+      this.hide(remkey)
+      return rementry
+    }
+
+    const parents = this._removeParents(rementry)
+
+    const children = this._getChildren(rementry)
+
+    for (const child of children) {
+      this._removeFromChild(child, rementry, parents)
+      if (child.Hidden && child.Parents.length === 1) {
+        this.remove(child.Key)
+      }
+    }
+
+    return this._removeEntry(remkey)
+  }
+
+
+  hide(key) {
+    var entry = this.getEntry(key)
+
+    if (!entry.Hidden) {
+      entry.hide()
+      this._propogateHiddenImpacted(entry, entry.getParent(0), (child.Impacted + child.HiddenImpacted))
+    }
+  }
+
+  unhide(key) {
+    var entry = this.getEntry(key)
+
+    if (entry.Hidden) {
+      this._propogateHiddenImpacted(entry, entry.getParent(0), -(child.Impacted + child.HiddenImpacted))
+      entry.unhide()
+    }
+  }
+
   _addToChild(child, newparent, grandparentkeys) {
     const removedParentKeys = []
 
@@ -94,12 +142,39 @@ class RuleSet {
       .forEach(k => this._addParent(child, this.getEntry(k)))
    }
 
+  _removeFromChild(child, remparent, grandparentkeys) {
+
+    function isNotAncestorOfAnyExistingParent(key) {
+      const descendent = child.Parents.find(p => !p.isEqual(remparent.Key) && key.isAncestorOf(p))
+      return (typeof descendent === 'undefined')
+    }
+
+    const tobeAddedParentKeys = grandparentkeys
+      .filter(isNotAncestorOfAnyExistingParent)
+
+    while (child.hasMoreDistantParent(remparent.Key)) {
+      tobeAddedParentKeys.push(this._removeParent(child))
+    }
+
+    // this next one must be our node
+    this._removeParent(child)
+
+    tobeAddedParentKeys
+      .sort(RuleSet.keycompare(child.Key))
+      .forEach(k => this._addParent(child, this.getEntry(k)))
+   }
+
+  _removeParents(entry) {
+    return entry.Parents
+              .map(p => this._removeParent(entry))
+  }
+
   _removeParent(child) {
 
     const parentEntry = this.getEntry(child.popParent())
 
     if (child.Parents.length === 0) {
-      this._propogateHiddenImpacted(child, parentEntry, true)
+      this._propogateHiddenImpacted(child, parentEntry, -(child.Impacted + child.HiddenImpacted))
     }
 
     parentEntry.changeImpactedBy(child.Scope)      
@@ -120,7 +195,7 @@ class RuleSet {
   _addParent(child, newparent) {
 
     if (child.Parents.length === 0) {
-      this._propogateHiddenImpacted(child, newparent, false)
+      this._propogateHiddenImpacted(child, newparent, (child.Impacted + child.HiddenImpacted))
     }
 
     newparent.changeImpactedBy(-child.Scope)
@@ -157,20 +232,27 @@ class RuleSet {
     this.getEntry(parentKey).changeImpactedBy(descopeChangeAmt)
   }
 
-  _propogateHiddenImpacted(child, parentEntry, remove = false) {
+  _propogateHiddenImpacted(child, parentEntry, impact) {
     while (child.Hidden && (typeof parentEntry !== 'undefined')) {
-
-      if (remove) {
-        parentEntry.changeHiddenImpactedBy(-child.Impacted - child.HiddenImpacted)
-      }
-      else {
-        parentEntry.changeHiddenImpactedBy(child.Impacted + child.HiddenImpacted)        
-      }
+      parentEntry.changeHiddenImpactedBy(impact)
 
       child = parentEntry
 
       parentEntry = child.getParent(0)
     }
+  }
+
+  _getChildren(newentry) {
+
+    const descendentEntries = new Map()
+
+    for (const [keystr, value] of this.Entries) {
+      if (newentry.Key.isAncestorOf(value.Key)) {
+        descendentEntries.set(keystr, value)
+      }
+    }
+
+    return RuleSet._lub(descendentEntries)
   }
 
   _getChildrenAndParents(newentry) {
@@ -200,14 +282,16 @@ class RuleSet {
     }
 
     const immParentEntries = RuleSet._glb(parentEntries)
-                              .sort((a,b) => {
-                                      a.Key.distanceFromRelated(newkey) - b.Key.distanceFromRelated(newkey)
-                                    })
+                              .sort(RuleSet.keycompare(newentry.Key))
 
     return {
       "children": RuleSet._lub(descendentEntries),
       "parents" : immParentEntries
     }
+  }
+
+  static keycompare(childkey) {
+    return (a,b) => a.Key.distanceFromRelated(childkey) - b.Key.distanceFromRelated(childkey)
   }
 
 
